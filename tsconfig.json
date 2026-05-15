@@ -3,13 +3,13 @@
 		// Enable latest features
 		"lib": ["ESNext", "DOM"],
 		"target": "ES2022",
-		"module": "CommonJS",
+		"module": "node18",
 		"moduleDetection": "force",
 		"jsx": "react-jsx",
 		"allowJs": true,
 
 		// Bundler mode
-		"moduleResolution": "node",
+		"moduleResolution": "node16",
 		"allowImportingTsExtensions": false,
 		"verbatimModuleSyntax": false,
 		"noEmit": false,
