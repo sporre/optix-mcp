@@ -1,5 +1,6 @@
 {
 	"name": "optix-graphql-mcp",
+	"type": "module",
 	"module": "index.ts",
 	"version": "1.0.0",
 	"description": "MCP Server for Optix workspace management with business-specific tools",
