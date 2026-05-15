@@ -4,7 +4,7 @@
 	"module": "index.ts",
 	"version": "1.0.0",
 	"description": "MCP Server for Optix workspace management with business-specific tools",
-	"repository": "github:Raulitoflying/optix-graphql-mcp",
+	"repository": "github:sporre/optix-mcp",
 	"keywords": [
 		"mcp",
 		"graphql",

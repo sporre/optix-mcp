@@ -3,18 +3,31 @@
 startCommand:
   type: stdio
   configSchema:
-    # JSON Schema defining the configuration options for the MCP.
     type: object
     required:
       - endpoint
+      - headers
     properties:
       endpoint:
         type: string
-        description: The GraphQL server endpoint URL.
+        description: Optix GraphQL API endpoint.
+        default: "https://api.optixapp.com/graphql"
       headers:
         type: string
-        description: Optional JSON string of headers to send with the GraphQL requests.
+        description: JSON string of HTTP headers, e.g. {"Authorization":"Bearer YOUR_OPTIX_TOKEN"}
+      allowMutations:
+        type: string
+        enum: ["true", "false"]
+        default: "false"
+        description: Set to "true" to enable mutation tools (create/cancel bookings, create members). Defaults to "false" for read-only safety.
   commandFunction:
-    # A function that produces the CLI command to start the MCP on stdio.
     |-
-    (config) => ({ command: 'node', args: ['/app/dist/index.js', '--endpoint', config.endpoint].concat(config.headers ? ['--headers', config.headers] : []), env: {} })
+    (config) => ({
+      command: 'bun',
+      args: ['run', '/usr/src/app/dist/index.js'],
+      env: {
+        ENDPOINT: config.endpoint,
+        HEADERS: config.headers,
+        ALLOW_MUTATIONS: config.allowMutations || 'false'
+      }
+    })
