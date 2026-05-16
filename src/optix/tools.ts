@@ -759,6 +759,30 @@ export function createOptixTools(): Map<string, OptixTool> {
 		},
 	});
 
+	tools.set("optix_list_newest_members", {
+		name: "optix_list_newest_members",
+		description: "List the newest members in your Optix workspace, sorted by creation date (most recent first). Use this to see recently joined members.",
+		inputSchema: z.object({
+			limit: z.number().min(1).max(100).default(10).describe("Maximum number of newest members to return"),
+			page: z.number().min(1).default(1).describe("Page number for pagination"),
+		}),
+		execute: async (args, endpoint, headers) => {
+			const data = await executeGraphQL(OPTIX_QUERIES.LIST_NEWEST_MEMBERS, args, endpoint, headers);
+			const members = data.accounts?.data || [];
+			return {
+				members,
+				total: data.accounts?.total || members.length,
+				pagination: {
+					returned: members.length,
+					total: data.accounts?.total || members.length,
+					page: args.page || 1,
+					limit: args.limit || 10,
+					hasMore: members.length === (args.limit || 10),
+				},
+			};
+		},
+	});
+
 	tools.set("optix_get_member_profile", {
 		name: "optix_get_member_profile",
 		description: "Get comprehensive member profile including contact details, professional info, location, social media, billing settings, and account status.",
