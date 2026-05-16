@@ -728,7 +728,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_list_members", {
 		name: "optix_list_members",
-		description: "List members in your Optix workspace. You can search by name/email, filter by status, or browse all members with pagination.",
+		description: "List members in your Optix workspace. You can search by name/email, filter by status, or browse all members with pagination. Note: a Member can belong to a Team. When attributing revenue/MRR, plans paid by a Team should be attributed to the Team account, not the individual Member.",
 		inputSchema: z.object({
 			search: z.string().optional().describe("Search by member name or email address"),
 			status: z.enum(["active", "inactive", "pending", "suspended"]).optional().describe("Filter by member status"),
@@ -754,6 +754,30 @@ export function createOptixTools(): Map<string, OptixTool> {
 						acc[member.status] = (acc[member.status] || 0) + 1;
 						return acc;
 					}, {}),
+				},
+			};
+		},
+	});
+
+	tools.set("optix_list_newest_members", {
+		name: "optix_list_newest_members",
+		description: "List the newest members in your Optix workspace, sorted by creation date (most recent first). Use this to see recently joined members. Note: if a Member belongs to a Team, any MRR they bring in should be attributed to the Team account, not the individual.",
+		inputSchema: z.object({
+			limit: z.number().min(1).max(100).default(10).describe("Maximum number of newest members to return"),
+			page: z.number().min(1).default(1).describe("Page number for pagination"),
+		}),
+		execute: async (args, endpoint, headers) => {
+			const data = await executeGraphQL(OPTIX_QUERIES.LIST_NEWEST_MEMBERS, args, endpoint, headers);
+			const members = data.accounts?.data || [];
+			return {
+				members,
+				total: data.accounts?.total || members.length,
+				pagination: {
+					returned: members.length,
+					total: data.accounts?.total || members.length,
+					page: args.page || 1,
+					limit: args.limit || 10,
+					hasMore: members.length === (args.limit || 10),
 				},
 			};
 		},
@@ -908,7 +932,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_list_plan_templates", {
 		name: "optix_list_plan_templates",
-		description: "List all membership plan templates (pricing plans) available in your workspace. These define the different membership tiers and their features.",
+		description: "List all membership plan templates (pricing plans) available in your workspace. These define the different membership tiers and their features. Each plan has a price_frequency (e.g. WEEKLY, MONTHLY) which must be normalized to a monthly value before reporting MRR (WEEKLY * 4.34, DAILY * 30.42, ANNUAL / 12, etc.).",
 		inputSchema: z.object({
 			active: z.boolean().default(true).describe("Filter by active status"),
 			category: z.string().optional().describe("Filter by plan category (e.g., 'premium', 'basic', 'corporate')"),
@@ -939,7 +963,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_get_plan_template", {
 		name: "optix_get_plan_template",
-		description: "Get detailed information about a specific membership plan template, including features, pricing, and restrictions.",
+		description: "Get detailed information about a specific membership plan template, including features, pricing, and restrictions. Remember to normalize the price by price_frequency when reporting MRR (e.g. WEEKLY price * 4.34).",
 		inputSchema: z.object({
 			id: z.string().describe("The plan template ID"),
 		}),

@@ -787,6 +787,36 @@ export const OPTIX_QUERIES = {
 		}
 	`,
 
+	LIST_NEWEST_MEMBERS: `
+		query ListNewestMembers(
+			$limit: Int = 10
+			$page: Int = 1
+		) {
+			accounts(
+				type: ["Member"]
+				order: CREATED_DESC
+				limit: $limit
+				page: $page
+			) {
+				data {
+					account_id
+					name
+					email
+					phone
+					status
+					created_timestamp
+					company
+					title
+					primary_location {
+						location_id
+						name
+					}
+				}
+				total
+			}
+		}
+	`,
+
 	GET_MEMBER: `
 		query GetMember($account: AccountInput!) {
 			account(account: $account) {
