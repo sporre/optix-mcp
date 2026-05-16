@@ -1034,7 +1034,31 @@ export const OPTIX_QUERIES = {
 				}
 			}
 		}
-	`
+	`,
+
+	GET_MRR_BREAKDOWN: `
+		query GetMrrBreakdown($limit: Int!, $page: Int!, $status: [AccountPlanStatus!]) {
+			accountPlans(limit: $limit, page: $page, status: $status) {
+				total
+				data {
+					account_plan_id
+					price
+					price_frequency
+					status
+					payer_account {
+						account_id
+						name
+						type
+						parent_accounts {
+							account_id
+							name
+							type
+						}
+					}
+				}
+			}
+		}
+	`,
 };
 
 // Export mutations (temporarily empty, can be added later)

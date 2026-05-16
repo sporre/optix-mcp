@@ -728,7 +728,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_list_members", {
 		name: "optix_list_members",
-		description: "List members in your Optix workspace. You can search by name/email, filter by status, or browse all members with pagination. Note: a Member can belong to a Team. When attributing revenue/MRR, plans paid by a Team should be attributed to the Team account, not the individual Member.",
+		description: "List members in your Optix workspace. You can search by name/email, filter by status, or browse all members with pagination. Account types: 'Member' (individual) or 'Team' (group account). A Member with non-empty parent_accounts belongs to a Team; for revenue attribution (MRR, billing) that Member's plan revenue should be credited to the Team, not the individual. Solo members have parent_accounts empty.",
 		inputSchema: z.object({
 			search: z.string().optional().describe("Search by member name or email address"),
 			status: z.enum(["active", "inactive", "pending", "suspended"]).optional().describe("Filter by member status"),
@@ -932,7 +932,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_list_plan_templates", {
 		name: "optix_list_plan_templates",
-		description: "List all membership plan templates (pricing plans) available in your workspace. These define the different membership tiers and their features. Each plan has a price_frequency (e.g. WEEKLY, MONTHLY) which must be normalized to a monthly value before reporting MRR (WEEKLY * 4.34, DAILY * 30.42, ANNUAL / 12, etc.).",
+		description: "List all membership plan templates (pricing plans) available in your workspace. These define the different membership tiers and their features. MRR conversion: a plan's price is denominated in its price_frequency (DAILY, WEEKLY, MONTHLY, QUARTERLY, BIANNUAL, ANNUAL). To normalize to monthly recurring revenue (MRR), multiply weekly prices by 4.34 (52 weeks / 12 months), divide quarterly by 3, biannual by 6, annual by 12. Daily plans rarely apply to MRR. Use this when computing aggregate workspace revenue.",
 		inputSchema: z.object({
 			active: z.boolean().default(true).describe("Filter by active status"),
 			category: z.string().optional().describe("Filter by plan category (e.g., 'premium', 'basic', 'corporate')"),
@@ -1042,7 +1042,7 @@ export function createOptixTools(): Map<string, OptixTool> {
 
 	tools.set("optix_get_member_stats", {
 		name: "optix_get_member_stats",
-		description: "Get account statistics including all account types (Member, Team, etc.) with status and type breakdowns.",
+		description: "Get account statistics including all account types (Member, Team, etc.) with status and type breakdowns. For MRR or revenue analytics, two rules apply: (1) normalize plan prices to monthly by multiplying WEEKLY by 4.34 and dividing QUARTERLY/BIANNUAL/ANNUAL by 3/6/12 respectively; (2) attribute a Member's MRR to their parent Team account when parent_accounts is non-empty, so team revenue is not double-counted on individual members.",
 		inputSchema: z.object({}),
 		execute: async (args, endpoint, headers) => {
 			const data = await executeGraphQL(OPTIX_QUERIES.GET_MEMBER_STATS, {}, endpoint, headers);
@@ -1069,6 +1069,121 @@ export function createOptixTools(): Map<string, OptixTool> {
 				insights: {
 					activePercentage: total > 0 ? Math.round((activeAccounts / total) * 100) : 0,
 					totalReturned: accounts.length,
+				},
+			};
+		},
+	});
+
+	tools.set("optix_get_mrr_breakdown", {
+		name: "optix_get_mrr_breakdown",
+		description: "Compute Monthly Recurring Revenue (MRR) across all active membership plans. Normalizes plan prices by price_frequency to a monthly figure (DAILY x30.44, WEEKLY x4.34, MONTHLY x1, QUARTERLY /3, BIANNUAL /6, ANNUAL /12). Attributes each plan to its payer_account; if that payer is a Member with a parent Team account, the MRR rolls up to the Team so revenue is not double-counted on individuals. Returns total MRR, breakdown by attribution type (individual vs team) and by frequency, plus a top contributors list. Use this for revenue snapshots, churn investigations, or comparing periods.",
+		inputSchema: z.object({
+			include_in_trial: z.boolean().default(true).describe("Include IN_TRIAL plans in MRR (default true; trial plans become paying customers)"),
+			top_n: z.number().min(1).max(50).default(10).describe("Number of top contributors to return"),
+		}),
+		execute: async (args, endpoint, headers) => {
+			const statuses = args.include_in_trial ? ["ACTIVE", "IN_TRIAL"] : ["ACTIVE"];
+			const pageSize = 100;
+			const allPlans: any[] = [];
+			let page = 1;
+			let total = 0;
+
+			while (true) {
+				const data = await executeGraphQL(
+					OPTIX_QUERIES.GET_MRR_BREAKDOWN,
+					{ limit: pageSize, page, status: statuses },
+					endpoint,
+					headers,
+				);
+				const plans = data.accountPlans?.data || [];
+				total = data.accountPlans?.total || 0;
+				allPlans.push(...plans);
+				if (allPlans.length >= total || plans.length === 0) break;
+				page += 1;
+				if (page > 50) break;
+			}
+
+			const FREQ_TO_MONTHLY: Record<string, number> = {
+				DAILY: 30.44,
+				WEEKLY: 4.34,
+				MONTHLY: 1,
+				QUARTERLY: 1 / 3,
+				BIANNUAL: 1 / 6,
+				ANNUAL: 1 / 12,
+			};
+
+			const byFrequency: Record<string, { count: number; mrr: number }> = {};
+			const byAttribution: Record<string, { name: string; type: string; mrr: number; planCount: number }> = {};
+			let individualMrr = 0;
+			let teamMrr = 0;
+			let unknownFrequencyCount = 0;
+			let totalMrr = 0;
+
+			for (const plan of allPlans) {
+				const price = plan.price || 0;
+				const freq = plan.price_frequency || "UNKNOWN";
+				const multiplier = FREQ_TO_MONTHLY[freq];
+				if (multiplier === undefined) {
+					unknownFrequencyCount += 1;
+					continue;
+				}
+				const monthlyValue = price * multiplier;
+				totalMrr += monthlyValue;
+
+				if (!byFrequency[freq]) byFrequency[freq] = { count: 0, mrr: 0 };
+				byFrequency[freq].count += 1;
+				byFrequency[freq].mrr += monthlyValue;
+
+				const payer = plan.payer_account;
+				if (!payer) continue;
+
+				const parentTeam = (payer.parent_accounts || []).find((p: any) => p.type === "Team");
+				const attributionAccount = parentTeam || payer;
+				const isTeam = attributionAccount.type === "Team";
+
+				if (isTeam) teamMrr += monthlyValue;
+				else individualMrr += monthlyValue;
+
+				const key = attributionAccount.account_id;
+				if (!byAttribution[key]) {
+					byAttribution[key] = {
+						name: attributionAccount.name,
+						type: attributionAccount.type,
+						mrr: 0,
+						planCount: 0,
+					};
+				}
+				byAttribution[key].mrr += monthlyValue;
+				byAttribution[key].planCount += 1;
+			}
+
+			const topContributors = Object.entries(byAttribution)
+				.map(([account_id, info]) => ({ account_id, ...info, mrr: Number(info.mrr.toFixed(2)) }))
+				.sort((a, b) => b.mrr - a.mrr)
+				.slice(0, args.top_n);
+
+			const formattedByFrequency = Object.fromEntries(
+				Object.entries(byFrequency).map(([freq, val]) => [
+					freq,
+					{ count: val.count, mrr: Number(val.mrr.toFixed(2)) },
+				]),
+			);
+
+			return {
+				totalMrr: Number(totalMrr.toFixed(2)),
+				byAttribution: {
+					individual: Number(individualMrr.toFixed(2)),
+					team: Number(teamMrr.toFixed(2)),
+				},
+				byFrequency: formattedByFrequency,
+				topContributors,
+				summary: {
+					plansIncluded: allPlans.length - unknownFrequencyCount,
+					plansTotal: total,
+					plansSkippedUnknownFrequency: unknownFrequencyCount,
+					statusesIncluded: statuses,
+					attributionRule: "Plans paid by a Member with a parent Team account are attributed to the Team.",
+					frequencyMultipliers: FREQ_TO_MONTHLY,
 				},
 			};
 		},
