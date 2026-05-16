@@ -93,11 +93,38 @@ async function loadSchemaForSearch() {
 // Detect if this is an Optix API endpoint
 const IS_OPTIX = env.ENDPOINT.includes("optixapp.com") || env.ENDPOINT.includes("optix");
 
-const server = new McpServer({
-	name: env.NAME,
-	version: getVersion(),
-	description: `GraphQL MCP server for ${env.ENDPOINT}${IS_OPTIX ? " (with Optix business tools)" : ""}`,
-});
+const OPTIX_INSTRUCTIONS = `Optix business rules for revenue and membership reporting:
+
+MRR normalization (Monthly Recurring Revenue):
+Plans have a "price_frequency" (PlanFrequency enum). Always normalize a plan's price to a monthly value before reporting or summing MRR. Use these multipliers (price * factor = MRR):
+  DAILY        -> 30.42
+  WEEKLY       -> 4.34
+  BIWEEKLY     -> 2.17
+  THIRTY_DAYS  -> 1
+  MONTHLY      -> 1
+  SIXTY_DAYS   -> 0.5
+  NINETY_DAYS  -> 0.3333
+  QUARTERLY    -> 0.3333
+  BIANNUAL     -> 0.1667
+  ANNUAL       -> 0.0833
+Never sum raw plan prices across mixed frequencies without normalizing first.
+
+Personal vs Team plan attribution:
+Accounts have a "type" field; relevant values include "Member" (personal account) and "Team" (team/company account). A Member can belong to one or more Teams. When a Member's plan is actually paid by their Team, the MRR belongs to the Team, not to the individual Member.
+When attributing MRR or listing paying entities:
+  - Roll up a Member's plan MRR to their Team if they are part of one.
+  - When reporting workspace-level MRR, prefer aggregating by paying account (Team where applicable, Member otherwise) to avoid double-counting.
+  - When showing per-member breakdowns, clearly flag which MRR is personal vs attributed to the Team they belong to.
+`;
+
+const server = new McpServer(
+	{
+		name: env.NAME,
+		version: getVersion(),
+		description: `GraphQL MCP server for ${env.ENDPOINT}${IS_OPTIX ? " (with Optix business tools)" : ""}`,
+	},
+	IS_OPTIX ? { instructions: OPTIX_INSTRUCTIONS } : undefined,
+);
 
 server.resource("graphql-schema", new URL(env.ENDPOINT).href, async (uri) => {
 	try {
